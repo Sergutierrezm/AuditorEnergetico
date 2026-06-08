@@ -1,0 +1,20 @@
+# --- Python & Backend ---
+backend/venv/
+backend/__pycache__/
+backend/*.pyc
+backend/consumo_pruebas.csv
+
+# --- Node & Frontend (React) ---
+frontend/node_modules/
+frontend/build/
+frontend/dist/
+frontend/.env.local
+frontend/.env.development.local
+frontend/.env.test.local
+frontend/.env.production.local
+
+# --- Sistema Operativo (Mac) ---
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
