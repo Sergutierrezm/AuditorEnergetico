@@ -1,6 +1,7 @@
-from fastapi import FastAPI, UploadFile, File
-from fastapi.middleware.cors import CORSMiddleware
+import io
 import pandas as pd
+from fastapi import FastAPI, UploadFile, File, HTTPException, status
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(title="Auditor Energético API")
 
@@ -41,10 +42,52 @@ def inicio():
 
 @app.post("/api/v1/auditar")
 async def auditar_consumo(file: UploadFile = File(...)):
-    df = pd.read_csv(file.file)
+    # --- ESCUDO 1: Validación de extensión ---
+    if not file.filename.endswith('.csv'):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El archivo seleccionado debe ser un formato CSV válido."
+        )
+    
+    try:
+        # Leemos los bytes del archivo cargado
+        contents = await file.read()
+        # io.BytesIO permite a Pandas leer los bytes en memoria como si fuera un archivo real
+        df = pd.read_csv(io.BytesIO(contents))
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No se ha podido leer el archivo. Asegúrate de que el CSV no esté corrupto."
+        )
+
+    # --- ESCUDO 2: Validación de columnas obligatorias ---
+    columnas_requeridas = ["Fecha", "Hora", "Consumo_kWh"]
+    for col in columnas_requeridas:
+        if col not in df.columns:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"El archivo no contiene la columna requerida: '{col}'."
+            )
+
+    # --- ESCUDO 3: Control de nulos y tipos de datos ---
+    # Si hay huecos vacíos en el consumo, los rellenamos con 0.0 para no romper las operaciones
+    if df["Consumo_kWh"].isnull().any():
+        df["Consumo_kWh"] = df["Consumo_kWh"].fillna(0.0)
+        
+    try:
+        # Forzamos que la columna de consumo sea float por si venía mapeada como texto
+        df["Consumo_kWh"] = df["Consumo_kWh"].astype(float)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="La columna 'Consumo_kWh' contiene valores que no se pueden procesar como números."
+        )
+
+    # ----------------------------------------------------------------
+    # TU LÓGICA ORIGINAL DE PROCESAMIENTO (A partir de aquí el dato está 100% limpio)
+    # ----------------------------------------------------------------
     
     # 1. Aplicamos la lógica de tramos hora por hora usando la magia de Pandas
-    # Creamos dos columnas nuevas basadas en nuestra función auxiliar
     resultados_tramo = df.apply(calcular_tramo_y_precio, axis=1)
     df["Tramo"] = [r[0] for r in resultados_tramo]
     df["Precio_kWh"] = [r[1] for r in resultados_tramo]
@@ -56,7 +99,7 @@ async def auditar_consumo(file: UploadFile = File(...)):
     consumo_total = float(df["Consumo_kWh"].sum())
     gasto_total = float(df["Coste_Euros"].sum())
     
-    # 4. ANÁLISIS POR TRAMOS (Agrupamos los datos con Pandas)
+    # 4. ANÁLISIS POR TRAMOS
     consumo_por_tramo = df.groupby("Tramo")["Consumo_kWh"].sum().to_dict()
     gasto_por_tramo = df.groupby("Tramo")["Coste_Euros"].sum().to_dict()
     
